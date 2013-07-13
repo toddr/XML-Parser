@@ -5,7 +5,7 @@ Revision history for Perl extension XML::Parser.
     - XS changes: stop using SvPV(string, PL_na)
     - Fix documentation typos
 
-2.41 2011-06-01 (by Todd Rinaldo
+2.41 2011-06-01 (by Todd Rinaldo)
     - Tests are cleaned. promoting to stable. No changes since 2.40_02
 
 2.40_02 2011-05-31 (by Todd Rinaldo)
