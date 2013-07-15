@@ -1,7 +1,7 @@
 Revision history for Perl extension XML::Parser.
 
-2.41_01 2013-07-12 (by Todd Rinaldo)
-    - Added instructi to README for OSX
+2.42_01 2013-07-12 (by Todd Rinaldo)
+    - Added instructions to README for OSX
     - XS changes: stop using SvPV(string, PL_na)
     - Fix documentation typos
 
