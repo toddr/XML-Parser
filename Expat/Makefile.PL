@@ -5,16 +5,9 @@ use English;
 my $libs = "-lexpat";
 my @extras = ();
 
-push(@extras, INC =>
-    (index($expat_incpath, ' ') != -1
-        ?"\"-I$expat_incpath\""
-        :"-I$expat_incpath"))
-    if $expat_incpath;
+push(@extras, INC => "-I$expat_incpath") if $expat_incpath;
 
-$libs = index($expat_libpath, ' ') != -1
-            ?"\"-L$expat_libpath\" $libs"
-            :"-L$expat_libpath $libs"
-    if $expat_libpath;
+$libs = "-L$expat_libpath $libs" if $expat_libpath;
 
 push(@extras, CAPI => 'TRUE')
     if (($PERL_VERSION >= 5.005) and ($OSNAME eq 'MSWin32')

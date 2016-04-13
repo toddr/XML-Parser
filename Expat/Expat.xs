@@ -11,7 +11,6 @@
 
 #include <expat.h>
 
-#define PERL_NO_GET_CONTEXT     /* we want efficiency */
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
@@ -31,10 +30,6 @@
 #define PL_sv_no	sv_no
 #define PL_sv_yes	sv_yes
 #define PL_na		na
-#endif
-
-#if defined(PERL_IMPLICIT_CONTEXT) && ! defined(tTHX)
-#  define tTHX PerlInterpreter*
 #endif
 
 #define BUFSIZE 32768
@@ -61,10 +56,6 @@
   if (RETVAL != &PL_sv_undef && SvREFCNT(RETVAL)) sv_2mortal(RETVAL)
 
 typedef struct {
-#ifdef PERL_IMPLICIT_CONTEXT
-    tTHX aTHX; /* on 5.8 and older, pTHX contains a "register" which is not
-                  compatible with a struct def, so use something else */
-#endif
   SV* self_sv;
   XML_Parser p;
 
@@ -115,12 +106,6 @@ typedef struct {
 } CallbackVector;
 
 
-#ifdef PERL_IMPLICIT_CONTEXT
-#  define dXMLTHX(x) dTHXa((x)->aTHX)
-#else
-#  define dXMLTHX(x) dNOOP
-#endif
-
 static HV* EncodingTable = NULL;
 
 static XML_Char nsdelim[] = {NSDELIM, '\0'};
@@ -129,9 +114,8 @@ static char *QuantChar[] = {"", "?", "*", "+"};
 
 /* Forward declarations */
 
-static void suspend_callbacks(pTHX_ CallbackVector *);
-static void resume_callbacks(pTHX_ CallbackVector *);
-static int  unknownEncoding(void *, const char *, XML_Encoding *);
+static void suspend_callbacks(CallbackVector *);
+static void resume_callbacks(CallbackVector *);
 
 #if PATCHLEVEL < 5 && SUBVERSION < 5
 
@@ -159,7 +143,7 @@ newSVpvn(char *s, STRLEN len)
 #ifdef SvUTF8_on
 
 static SV *
-newUTF8SVpv_thx(pTHX_ char *s, STRLEN len) {
+newUTF8SVpv(char *s, STRLEN len) {
   register SV *sv;
 
   sv = newSVpv(s, len);
@@ -168,7 +152,7 @@ newUTF8SVpv_thx(pTHX_ char *s, STRLEN len) {
 }  /* End new UTF8SVpv */
 
 static SV *
-newUTF8SVpvn_thx(pTHX_ char *s, STRLEN len) {
+newUTF8SVpvn(char *s, STRLEN len) {
   register SV *sv;
 
   sv = newSV(0);
@@ -176,9 +160,6 @@ newUTF8SVpvn_thx(pTHX_ char *s, STRLEN len) {
   SvUTF8_on(sv);
   return sv;
 }
-
-#define newUTF8SVpv(s, len) newUTF8SVpv_thx(aTHX_ (s), (len))
-#define newUTF8SVpvn(s, len) newUTF8SVpvn_thx(aTHX_ (s), (len))
 
 #else  /* SvUTF8_on not defined */
 
@@ -213,7 +194,7 @@ myfree(void *p) {
 static XML_Memory_Handling_Suite ms = {mymalloc, myrealloc, myfree};
 
 static void
-append_error(pTHX_ XML_Parser parser, char * err)
+append_error(XML_Parser parser, char * err)
 {
   dSP;
   CallbackVector * cbv;
@@ -267,7 +248,7 @@ append_error(pTHX_ XML_Parser parser, char * err)
 }  /* End append_error */
 
 static SV *
-generate_model(pTHX_ XML_Content *model) {
+generate_model(XML_Content *model) {
   HV * hash = newHV();
   SV * obj = newRV_noinc((SV *) hash);
 
@@ -292,7 +273,7 @@ generate_model(pTHX_ XML_Content *model) {
 	int i;
 
 	for (i = 0; i < model->numchildren; i++) {
-	  av_push(children, generate_model(aTHX_ &model->children[i]));
+	  av_push(children, generate_model(&model->children[i]));
 	}
 
 	hv_store(hash, "Children", 8, newRV_noinc((SV *) children), 0);
@@ -304,7 +285,7 @@ generate_model(pTHX_ XML_Content *model) {
 }  /* End generate_model */
 
 static int
-parse_stream(pTHX_ XML_Parser parser, SV * ioref)
+parse_stream(XML_Parser parser, SV * ioref)
 {
   dSP;
   SV *		tbuff;
@@ -424,7 +405,7 @@ parse_stream(pTHX_ XML_Parser parser, SV * ioref)
     }
 
   if (! ret)
-    append_error(aTHX_ parser, msg);
+    append_error(parser, msg);
 
   if (! cbv->delim) {
     SvREFCNT_dec(tsiz);
@@ -438,7 +419,7 @@ parse_stream(pTHX_ XML_Parser parser, SV * ioref)
 }  /* End parse_stream */
 
 static SV *
-gen_ns_name(pTHX_ const char * name, HV * ns_table, AV * ns_list)
+gen_ns_name(const char * name, HV * ns_table, AV * ns_list)
 {
   char	*pos = strchr(name, NSDELIM);
   SV * ret;
@@ -477,9 +458,8 @@ gen_ns_name(pTHX_ const char * name, HV * ns_table, AV * ns_list)
 static void
 characterData(void *userData, const char *s, int len)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -498,9 +478,8 @@ characterData(void *userData, const char *s, int len)
 static void
 startElement(void *userData, const char *name, const char **atts)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
   SV ** pcontext;
   unsigned   do_ns = cbv->ns;
   unsigned   skipping = 0;
@@ -513,7 +492,7 @@ startElement(void *userData, const char *name, const char **atts)
   if (cbv->skip_until) {
     skipping = cbv->st_serial < cbv->skip_until;
     if (! skipping) {
-      resume_callbacks(aTHX_ cbv);
+      resume_callbacks(cbv);
       cbv->skip_until = 0;
     }
   }
@@ -528,7 +507,7 @@ startElement(void *userData, const char *name, const char **atts)
   cbv->st_serial_stack[++cbv->st_serial_stackptr] =  cbv->st_serial;
   
   if (do_ns)
-    elname = gen_ns_name(aTHX_ name, cbv->nstab, cbv->nslst);
+    elname = gen_ns_name(name, cbv->nstab, cbv->nslst);
   else
     elname = newUTF8SVpv((char *)name, 0);
 
@@ -550,7 +529,7 @@ startElement(void *userData, const char *name, const char **atts)
 	{
 	  SV * attname;
 
-	  attname = (do_ns ? gen_ns_name(aTHX_ *atts, cbv->nstab, cbv->nslst)
+	  attname = (do_ns ? gen_ns_name(*atts, cbv->nstab, cbv->nslst)
 		     : newUTF8SVpv((char *) *atts, 0));
 	    
 	  atts++;
@@ -575,9 +554,8 @@ startElement(void *userData, const char *name, const char **atts)
 static void
 endElement(void *userData, const char *name)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
   SV *elname;
 
   elname = av_pop(cbv->context);
@@ -610,9 +588,8 @@ endElement(void *userData, const char *name)
 static void
 processingInstruction(void *userData, const char *target, const char *data)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -632,9 +609,8 @@ processingInstruction(void *userData, const char *target, const char *data)
 static void
 commenthandle(void *userData, const char *string)
 {
-  CallbackVector * cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector * cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -653,9 +629,8 @@ commenthandle(void *userData, const char *string)
 static void
 startCdata(void *userData)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
 
   if (cbv->startcd_sv) {
     ENTER;
@@ -674,9 +649,8 @@ startCdata(void *userData)
 static void
 endCdata(void *userData)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
 
   if (cbv->endcd_sv) {
     ENTER;
@@ -694,9 +668,8 @@ endCdata(void *userData)
 
 static void
 nsStart(void *userdata, const XML_Char *prefix, const XML_Char *uri){
-  CallbackVector* cbv = (CallbackVector*) userdata;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userdata;
 
   ENTER;
   SAVETMPS;
@@ -715,9 +688,8 @@ nsStart(void *userdata, const XML_Char *prefix, const XML_Char *uri){
 
 static void
 nsEnd(void *userdata, const XML_Char *prefix) {
-  CallbackVector* cbv = (CallbackVector*) userdata;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userdata;
 
   ENTER;
   SAVETMPS;
@@ -736,9 +708,8 @@ nsEnd(void *userdata, const XML_Char *prefix) {
 static void
 defaulthandle(void *userData, const char *string, int len)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -758,16 +729,15 @@ static void
 elementDecl(void *data,
 	    const char *name,
 	    XML_Content *model) {
-  CallbackVector *cbv = (CallbackVector*) data;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector *cbv = (CallbackVector*) data;
   SV *cmod;
 
   ENTER;
   SAVETMPS;
 
 
-  cmod = generate_model(aTHX_ model);
+  cmod = generate_model(model);
 
   Safefree(model);
   PUSHMARK(sp);
@@ -789,9 +759,8 @@ attributeDecl(void *data,
 	      const char * att_type,
 	      const char * dflt,
 	      int          reqorfix) {
-  CallbackVector *cbv = (CallbackVector*) data;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector *cbv = (CallbackVector*) data;
   SV * dfltsv;
 
   if (dflt) {
@@ -831,9 +800,8 @@ entityDecl(void *data,
 	   const char *sysid,
 	   const char *pubid,
 	   const char *notation) {
-  CallbackVector *cbv = (CallbackVector*) data;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector *cbv = (CallbackVector*) data;
 
   ENTER;
   SAVETMPS;
@@ -861,9 +829,8 @@ doctypeStart(void *userData,
 	     const char* sysid,
 	     const char* pubid,
 	     int hasinternal) {
-  CallbackVector *cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector *cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -883,9 +850,8 @@ doctypeStart(void *userData,
 
 static void
 doctypeEnd(void *userData) {
-  CallbackVector *cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector *cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -904,9 +870,8 @@ xmlDecl(void *userData,
 	const char *version,
 	const char *encoding,
 	int standalone) {
-  CallbackVector *cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector *cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -934,9 +899,8 @@ unparsedEntityDecl(void *userData,
 		   const char* pubid,
 		   const char* notation)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
 
   ENTER;
   SAVETMPS;
@@ -963,9 +927,8 @@ notationDecl(void *userData,
 	     const char *sysid,
 	     const char *pubid)
 {
-  CallbackVector* cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
   dSP;
+  CallbackVector* cbv = (CallbackVector*) userData;
 
   PUSHMARK(sp);
   XPUSHs(cbv->self_sv);
@@ -1002,14 +965,16 @@ externalEntityRef(XML_Parser parser,
 		  const char* sysid,
 		  const char* pubid)
 {
+  dSP;
+#if defined(USE_THREADS) && PATCHLEVEL==6
+  dTHX;
+#endif
 
   int count;
   int ret = 0;
   int parse_done = 0;
 
   CallbackVector* cbv = (CallbackVector*) XML_GetUserData(parser);
-  dXMLTHX(cbv);
-  dSP;
 
   if (! cbv->extent_sv)
     return 0;
@@ -1031,13 +996,12 @@ externalEntityRef(XML_Parser parser,
   if (count >= 1) {
     SV * result = POPs;
     int type;
-    SV * errsv;
 
     if (result && (type = SvTYPE(result)) > 0) {
       SV **pval = hv_fetch((HV*) SvRV(cbv->self_sv), "Parser", 6, 0);
 
       if (! pval || ! SvIOK(*pval))
-	append_error(aTHX_ parser, "Can't find parser entry in XML::Parser object");
+	append_error(parser, "Can't find parser entry in XML::Parser object");
       else {
 	XML_Parser entpar;
 	char *errmsg = (char *) 0;
@@ -1045,15 +1009,6 @@ externalEntityRef(XML_Parser parser,
 	entpar = XML_ExternalEntityParserCreate(parser, open, 0);
 
 	XML_SetBase(entpar, XML_GetBase(parser));
-  /* inside XML_ExternalEntityParserCreate, oldUnknownEncodingHandler is copied
-   * to (new) unknownEncodingHandler but unknownEncodingHandlerData is NOT!, so
-   * later on when unknownEncoding executes, var unused is NULL and SEGVs, so
-   * manually set unknownEncodingHandlerData again so my_perl is stored and not
-   * NULL in this new parser
-   */
-#ifdef PERL_IMPLICIT_CONTEXT
-	XML_SetUnknownEncodingHandler(entpar, unknownEncoding, aTHX);
-#endif
 
 	sv_setiv(*pval, (IV) entpar);
 
@@ -1068,13 +1023,12 @@ externalEntityRef(XML_Parser parser,
 			     G_SCALAR | G_EVAL);
 	SPAGAIN;
 
-	errsv = ERRSV;
-	if (SvTRUE(errsv)) {
+	if (SvTRUE(ERRSV)) {
 	  char *hold;
 	  STRLEN   len;
 
 	  POPs;
-	  hold = SvPV(errsv, len);
+	  hold = SvPV(ERRSV, len);
 	  New(326, errmsg, len + 1, char);
 	  if (len)
 	    Copy(hold, errmsg, len, char);
@@ -1099,15 +1053,14 @@ externalEntityRef(XML_Parser parser,
 	  SPAGAIN;
 	}
 
-	errsv = ERRSV;
-	if (SvTRUE(errsv))
-	  append_error(aTHX_ parser, SvPV_nolen(errsv));
+	if (SvTRUE(ERRSV))
+	  append_error(parser, SvPV_nolen(ERRSV));
       }
     }
   }
 
   if (! ret && ! parse_done)
-    append_error(aTHX_ parser, "Handler couldn't resolve external entity");
+    append_error(parser, "Handler couldn't resolve external entity");
 
   PUTBACK ;
   FREETMPS ;
@@ -1163,9 +1116,6 @@ convert_to_unicode(void *data, const char *seq) {
 static int
 unknownEncoding(void *unused, const char *name, XML_Encoding *info)
 {
-#ifdef PERL_IMPLICIT_CONTEXT
-  dTHXa(unused);
-#endif
   SV ** encinfptr;
   Encinfo *enc;
   int namelen;
@@ -1235,7 +1185,6 @@ static void
 recString(void *userData, const char *string, int len)
 {
   CallbackVector *cbv = (CallbackVector*) userData;
-  dXMLTHX(cbv);
 
   if (cbv->recstring) {
     sv_catpvn(cbv->recstring, (char *) string, len);
@@ -1246,7 +1195,7 @@ recString(void *userData, const char *string, int len)
 }  /* End recString */
 
 static void
-suspend_callbacks(pTHX_ CallbackVector *cbv) {
+suspend_callbacks(CallbackVector *cbv) {
   if (SvTRUE(cbv->char_sv)) {
     XML_SetCharacterDataHandler(cbv->p,
 				(XML_CharacterDataHandler) 0);
@@ -1287,7 +1236,7 @@ suspend_callbacks(pTHX_ CallbackVector *cbv) {
 }  /* End suspend_callbacks */
 
 static void
-resume_callbacks(pTHX_ CallbackVector *cbv) {
+resume_callbacks(CallbackVector *cbv) {
   if (SvTRUE(cbv->char_sv)) {
     XML_SetCharacterDataHandler(cbv->p, characterData);
   }
@@ -1335,9 +1284,6 @@ XML_ParserCreate(self_sv, enc_sv, namespaces)
 	  SV ** spp;
 
 	  Newz(320, cbv, 1, CallbackVector);
-#ifdef PERL_IMPLICIT_CONTEXT
-	  cbv->aTHX = aTHX;
-#endif
 	  cbv->self_sv = SvREFCNT_inc(self_sv);
 	  Newz(325, cbv->st_serial_stack, 1024, unsigned int);
 	  spp = hv_fetch((HV*)SvRV(cbv->self_sv), "NoExpand", 8, 0);
@@ -1384,12 +1330,7 @@ XML_ParserCreate(self_sv, enc_sv, namespaces)
 	  cbv->p = RETVAL;
 	  XML_SetUserData(RETVAL, (void *) cbv);
 	  XML_SetElementHandler(RETVAL, startElement, endElement);
-#ifdef PERL_IMPLICIT_CONTEXT
-	  XML_SetUnknownEncodingHandler(RETVAL, unknownEncoding, aTHX);
-#else
 	  XML_SetUnknownEncodingHandler(RETVAL, unknownEncoding, 0);
-#error bad
-#endif
 
 	  spp = hv_fetch((HV*)SvRV(cbv->self_sv), "ParseParamEnt",
 			 13, FALSE);
@@ -1507,7 +1448,7 @@ XML_ParseString(parser, sv)
 	  RETVAL = XML_Parse(parser, s, len, 1);
 	  SPAGAIN; /* XML_Parse might have changed stack pointer */
 	  if (! RETVAL)
-	    append_error(aTHX_ parser, NULL);
+	    append_error(parser, NULL);
 	}
 
     OUTPUT:
@@ -1531,7 +1472,7 @@ XML_ParseStream(parser, ioref, delim)
 	    cbv->delim = (char *) 0;
 	  }
 	      
-	  RETVAL = parse_stream(aTHX_ parser, ioref);
+	  RETVAL = parse_stream(parser, ioref);
 	  SPAGAIN; /* parse_stream might have changed stack pointer */
 	}
 
@@ -1550,7 +1491,7 @@ XML_ParsePartial(parser, sv)
 
 	  RETVAL = XML_Parse(parser, s, len, 0);
 	  if (! RETVAL)
-	    append_error(aTHX_ parser, NULL);
+	    append_error(parser, NULL);
 	}
 
     OUTPUT:
@@ -1564,7 +1505,7 @@ XML_ParseDone(parser)
 	{
 	  RETVAL = XML_Parse(parser, "", 0, 1);
 	  if (! RETVAL)
-	    append_error(aTHX_ parser, NULL);
+	    append_error(parser, NULL);
 	}
 
     OUTPUT:
@@ -1967,7 +1908,7 @@ GenerateNSName(name, xml_namespace, table, list)
 	    *bp++ = *nmstr++;
 	  *bp = '\0';
 
-	  RETVAL = gen_ns_name(aTHX_ buff, (HV *) SvRV(table), (AV *) SvRV(list));
+	  RETVAL = gen_ns_name(buff, (HV *) SvRV(table), (AV *) SvRV(list));
 	  Safefree(buff);
 	}	
     OUTPUT:
@@ -2204,7 +2145,7 @@ XML_UnsetAllHandlers(parser)
 	{
 	  CallbackVector * cbv = (CallbackVector *) XML_GetUserData(parser);
 	  
-	  suspend_callbacks(aTHX_ cbv);
+	  suspend_callbacks(cbv);
 	  if (cbv->ns) {
 	    XML_SetNamespaceDeclHandler(cbv->p,
 					(XML_StartNamespaceDeclHandler) 0,
@@ -2241,7 +2182,7 @@ XML_SkipUntil(parser, index)
 	  if (index <= cbv->st_serial)
 	    return;
 	  cbv->skip_until = index;
-	  suspend_callbacks(aTHX_ cbv);
+	  suspend_callbacks(cbv);
 	}
 
 int
@@ -2255,10 +2196,10 @@ XML_Do_External_Parse(parser, result)
           CallbackVector * cbv = (CallbackVector *) XML_GetUserData(parser);
 	  
 	  if (SvROK(result) && SvOBJECT(SvRV(result))) {
-	    RETVAL = parse_stream(aTHX_ parser, result);
+	    RETVAL = parse_stream(parser, result);
 	  }
 	  else if (isGV(result)) {
-	    RETVAL = parse_stream(aTHX_ parser,
+	    RETVAL = parse_stream(parser,
 				  sv_2mortal(newRV((SV*) GvIOp(result))));
 	  }
 	  else if (SvPOK(result)) {
