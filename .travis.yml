@@ -10,3 +10,7 @@ perl:
   - 5.22
 before_script:
   - "sudo apt-get install libexpat1-dev"
+script: "perl Makefile.PL EXPATLIBPATH=$EXPATLIBPATH EXPATINCPATH=$EXPATINCPATH && make test"
+after_failure:
+  - "perl -V"
+  - "perl -MData::Dumper -MConfig -e'print Dumper \\%Config'"
