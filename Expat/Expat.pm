@@ -1147,7 +1147,7 @@ The element declaration handlers are passed objects of this class as the
 content model of the element declaration. They also represent content
 particles, components of a content model.
 
-When referred to as a string, these objects are automagicly converted to a
+When referred to as a string, these objects are automagically converted to a
 string representation of the model (or content particle).
 
 =over 4
